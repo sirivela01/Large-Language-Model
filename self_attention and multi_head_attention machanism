@@ -1,0 +1,132 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import nltk
+from nltk.corpus import brown
+
+# -------------------------------
+# NLTK setup
+# -------------------------------
+nltk.download('brown')
+
+# -------------------------------
+# Self-Attention
+# -------------------------------
+class SelfAttention(nn.Module):
+    def __init__(self, embed_dim):
+        super(SelfAttention, self).__init__()
+        self.embed_dim = embed_dim
+        self.query = nn.Linear(embed_dim, embed_dim)
+        self.key   = nn.Linear(embed_dim, embed_dim)
+        self.value = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x, mask=None):
+        Q = self.query(x)
+        K = self.key(x)
+        V = self.value(x)
+
+        scores = torch.matmul(Q, K.transpose(-2, -1))
+        scores = scores / (self.embed_dim ** 0.5)
+
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, -1e9)
+
+        attention = F.softmax(scores, dim=-1)
+        output = torch.matmul(attention, V)
+
+        return output, attention
+
+
+# -------------------------------
+# Multi-Head Attention
+# -------------------------------
+class MultiHeadAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads):
+        super(MultiHeadAttention, self).__init__()
+        assert embed_dim % num_heads == 0
+
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        self.qkv = nn.Linear(embed_dim, embed_dim * 3)
+        self.fc_out = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x):
+        batch_size, seq_len, embed_dim = x.shape
+
+        qkv = self.qkv(x)
+        qkv = qkv.reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+
+        Q, K, V = qkv[0], qkv[1], qkv[2]
+
+        scores = torch.matmul(Q, K.transpose(-2, -1))
+        scores = scores / (self.head_dim ** 0.5)
+
+        attention = F.softmax(scores, dim=-1)
+
+        out = torch.matmul(attention, V)
+        out = out.permute(0, 2, 1, 3).contiguous()
+        out = out.reshape(batch_size, seq_len, embed_dim)
+
+        out = self.fc_out(out)
+        return out, attention
+
+
+# -------------------------------
+# Example Input (Brown corpus)
+# -------------------------------
+torch.manual_seed(1)
+
+sentence = brown.sents()[0][:6]  # take 6 words
+vocab_size = 1000
+embedding_dim = 8
+
+embedding = nn.Embedding(vocab_size, embedding_dim)
+word_to_id = {word: i % vocab_size for i, word in enumerate(set(sentence))}
+input_ids = torch.tensor([[word_to_id[w] for w in sentence]])
+
+x = embedding(input_ids)
+
+print("Sentence:", sentence)
+print("Input shape:", x.shape)
+
+# -------------------------------
+# Run Self-Attention
+# -------------------------------
+self_attn = SelfAttention(embedding_dim)
+sa_output, sa_weights = self_attn(x)
+
+# -------------------------------
+# Run Multi-Head Attention
+# -------------------------------
+mha = MultiHeadAttention(embedding_dim, num_heads=2)
+mha_output, mha_weights = mha(x)
+
+# -------------------------------
+# Visualization
+# -------------------------------
+def plot_all_heads(attention, title_prefix):
+    num_heads = attention.shape[0]
+    plt.figure(figsize=(12, 4))
+
+    for h in range(num_heads):
+        plt.subplot(1, num_heads, h + 1)
+        plt.imshow(attention[h], cmap="viridis")
+        plt.colorbar()
+        plt.title(f"{title_prefix} - Head {h+1}")
+        plt.xlabel("Key")
+        plt.ylabel("Query")
+
+    plt.tight_layout()
+    plt.show()
+
+# Self-attention (single head)
+plot_all_heads(sa_weights[0].detach().numpy().reshape(1, len(sentence), len(sentence)),
+               "Self-Attention")
+
+# Multi-head attention (all heads)
+plot_all_heads(mha_weights[0].detach().numpy(),
+               "Multi-Head Attention")
