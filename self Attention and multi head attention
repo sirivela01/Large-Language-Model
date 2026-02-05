@@ -1,0 +1,106 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# -----------------------------
+# Helper: Softmax
+# -----------------------------
+def softmax(x):
+    e_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
+    return e_x / np.sum(e_x, axis=-1, keepdims=True)
+
+# -----------------------------
+# Self Attention
+# -----------------------------
+class SelfAttention:
+    def __init__(self, d_model):
+        self.d_model = d_model
+
+        # Weight matrices
+        self.Wq = np.random.randn(d_model, d_model)
+        self.Wk = np.random.randn(d_model, d_model)
+        self.Wv = np.random.randn(d_model, d_model)
+
+    def forward(self, X):
+        Q = X @ self.Wq
+        K = X @ self.Wk
+        V = X @ self.Wv
+
+        # Scaled dot-product attention
+        scores = Q @ K.T / np.sqrt(self.d_model)
+        weights = softmax(scores)
+        output = weights @ V
+
+        return output, weights
+
+# -----------------------------
+# Multi Head Attention
+# -----------------------------
+class MultiHeadAttention:
+    def __init__(self, d_model, num_heads):
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+
+        self.heads = [SelfAttention(self.head_dim) for _ in range(num_heads)]
+        self.Wo = np.random.randn(d_model, d_model)
+
+    def forward(self, X):
+        batch = []
+
+        attention_maps = []
+
+        for i in range(self.num_heads):
+            Xi = X[:, i*self.head_dim:(i+1)*self.head_dim]
+            out, attn = self.heads[i].forward(Xi)
+            batch.append(out)
+            attention_maps.append(attn)
+
+        concat = np.concatenate(batch, axis=-1)
+        final = concat @ self.Wo
+
+        return final, attention_maps
+
+# -----------------------------
+# Visualization Function
+# -----------------------------
+def plot_attention(attention, title):
+    plt.imshow(attention, cmap="viridis")
+    plt.colorbar()
+    plt.title(title)
+    plt.xlabel("Key")
+    plt.ylabel("Query")
+    plt.show()
+
+# -----------------------------
+# Example Run
+# -----------------------------
+np.random.seed(0)
+
+sequence_length = 5
+d_model = 8
+num_heads = 2
+
+# Dummy input (5 tokens, embedding size 8)
+X = np.random.rand(sequence_length, d_model)
+
+print("Input:")
+print(X)
+
+# ---- Self Attention ----
+sa = SelfAttention(d_model)
+sa_out, sa_weights = sa.forward(X)
+
+print("\nSelf Attention Output:")
+print(sa_out)
+
+plot_attention(sa_weights, "Self Attention Weights")
+
+# ---- Multi Head Attention ----
+mha = MultiHeadAttention(d_model, num_heads)
+mha_out, mha_weights = mha.forward(X)
+
+print("\nMulti Head Attention Output:")
+print(mha_out)
+
+for i, w in enumerate(mha_weights):
+    plot_attention(w, f"Head {i+1} Attention")
